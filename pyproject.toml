@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hearth"
+version = "0.1.0"
+description = "Schema-driven settings store with a change-diff signal"
+requires-python = ">=3.9"
+
+[project.scripts]
+hearth = "hearth.main:main"
+
+[tool.setuptools]
+packages = ["hearth"]
