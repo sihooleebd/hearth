@@ -7,6 +7,7 @@ name = "hearth"
 version = "0.1.0"
 description = "Schema-driven settings store with a change-diff signal"
 requires-python = ">=3.9"
+dependencies = ["textual"]   # only `hearth tui` needs it; the core CLI is pure stdlib (lazy import)
 
 [project.scripts]
 hearth = "hearth.main:main"

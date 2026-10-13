@@ -154,19 +154,38 @@ def sync():
 
 
 # ----------------------------- CLI -----------------------------
-def cmd_set(key, raw):
+def set_value(key, raw):
+    """Validate + write one override, re-materialise, signal. Returns (ok, value|error) -- the
+    programmatic API the TUI (and anything embedding hearth) uses."""
     sch = _schema()
     if key not in sch:
-        die(f"unknown setting: {key}")
+        return (False, f"unknown setting: {key}")
     try:
         val = _coerce(sch[key], raw)
     except Exception as e:
-        die(f"invalid value for {key}: {e}")
+        return (False, str(e))
     ov = _load(OVERRIDE, {})
     ov[key] = val
     _atomic(OVERRIDE, ov)
     sync()
-    print(json.dumps(val))
+    return (True, val)
+
+
+def reset_value(key):
+    """Drop an override (back to the schema default), re-materialise, signal."""
+    ov = _load(OVERRIDE, {})
+    if key in ov:
+        del ov[key]
+        _atomic(OVERRIDE, ov)
+        sync()
+    return (True, None)
+
+
+def cmd_set(key, raw):
+    ok, res = set_value(key, raw)
+    if not ok:
+        die(f"invalid value for {key}: {res}")
+    print(json.dumps(res))
 
 
 def cmd_get(key):
@@ -177,11 +196,7 @@ def cmd_get(key):
 
 
 def cmd_reset(key):
-    ov = _load(OVERRIDE, {})
-    if key in ov:
-        del ov[key]
-        _atomic(OVERRIDE, ov)
-        sync()
+    reset_value(key)
     print("ok")
 
 
@@ -231,6 +246,9 @@ def main():
         print(" ".join(sync()))
     elif cmd == "watch":
         cmd_watch(a[1:])
+    elif cmd == "tui":
+        from . import tui
+        return tui.run(a[1:])
     else:
         die(f"bad args: {a}")
     return 0

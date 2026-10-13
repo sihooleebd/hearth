@@ -10,10 +10,12 @@ python3Packages.buildPythonApplication {
 
   build-system = [ python3Packages.setuptools ];
 
-  # Pure standard library -- no runtime dependencies, nothing to wrap. hearth only reads/writes JSON
-  # files and polls an mtime; the app that embeds it generates schema.json and points $HEARTH_DIR at it.
+  # The core engine (store + signal + CLI) is pure standard library. Only `hearth tui` needs textual
+  # (lazy-imported), so the CLI still runs on a host without it.
+  dependencies = [ python3Packages.textual ];
+
   doCheck = false;
-  pythonImportsCheck = [ "hearth" ];
+  pythonImportsCheck = [ "hearth" "hearth.tui" ];
 
   meta = {
     description = "Schema-driven settings store with a change-diff signal (one JSON store, per-key reload signal)";
