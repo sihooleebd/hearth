@@ -10,6 +10,22 @@ import json
 
 from . import main as hearth
 
+# Braille mark shown on the TUI landing screen. Kept in sync with ../logo.txt via .logo-gen.py.
+HEARTH_LOGO = """
+⠀⢠⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⡄⠀
+⠀⠸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠇⠀
+⠀⠀⢸⣿⣿⣿⣿⣿⡿⠿⠿⠿⠿⢿⣿⣿⣿⣿⣿⡇⠀⠀
+⠀⠀⢸⣿⣿⣿⡿⠃⠀⠀⠀⠀⠀⠀⠘⢿⣿⣿⣿⡇⠀⠀
+⠀⠀⢸⣿⣿⣿⠃⠀⠀⠀⠀⠀⠀⠀⠀⠘⣿⣿⣿⡇⠀⠀
+⠀⠀⢸⣿⣿⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⣿⣿⡇⠀⠀
+⠀⠀⢸⣿⣿⣿⠀⠀⠀⠀⣴⣧⠀⠀⠀⠀⣿⣿⣿⡇⠀⠀
+⠀⠀⢸⣿⣿⣿⠀⠀⣠⢠⣿⣿⡆⣦⡀⠀⣿⣿⣿⡇⠀⠀
+⠀⠀⢸⣿⣿⣿⠀⣸⣿⣾⣿⣿⣷⣿⣇⠀⣿⣿⣿⡇⠀⠀
+⠀⠀⢸⣿⣿⣿⠀⣿⣿⣿⣿⣿⣿⣿⣿⠀⣿⣿⣿⡇⠀⠀
+⢀⣀⣸⣿⣿⣿⣀⣿⣿⣿⣿⣿⣿⣿⣿⣀⣿⣿⣿⣇⣀⡀
+⠸⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠇
+"""
+
 
 def _fmt(v):
     if isinstance(v, bool):
@@ -59,7 +75,7 @@ def run(argv=None):
                     yield Input(placeholder="/ to search", id="search")
                     yield Tree("bonfire \U0001f525", id="tree")
                 with Vertical(id="detail"):
-                    yield Static("Select a setting.", id="info")
+                    yield Static("", id="info")
                     yield Input(id="ed")
                     yield Static("", id="msg")
             yield Footer()
@@ -67,6 +83,26 @@ def run(argv=None):
         def on_mount(self):
             self.title = "hearth settings"
             self._build()
+            self._home()
+
+        # ---- landing screen: the hearth mark + a hint ----
+        def _banner(self):
+            fire = ["#f6c453", "#f4a833", "#ef8d2f", "#e5702a", "#d8542a",
+                    "#e5702a", "#ef8d2f", "#f4a833", "#f6c453", "#ef8d2f", "#e5702a", "#d8542a"]
+            rows = HEARTH_LOGO.strip("\n").split("\n")
+            out = [f"[{fire[i % len(fire)]}]{r}[/]" for i, r in enumerate(rows)]
+            out += ["", "[b]hearth[/b] [dim]— unified settings[/dim]",
+                    "[dim]pick a setting from the tree to view or change it.[/dim]"]
+            return "\n".join(out)
+
+        def _home(self):
+            self.key = None
+            self.query_one("#info", Static).update(self._banner())
+            ed = self.query_one("#ed", Input)
+            ed.value = ""
+            ed.styles.display = "none"
+            self.query_one("#msg", Static).update(
+                "[dim]↑↓ navigate · ⏎ select · / search · . advanced · q quit[/dim]")
 
         # ---- build the category tree from the dotted keys ----
         def _build(self):
@@ -163,6 +199,7 @@ def run(argv=None):
 
         def action_to_tree(self):
             self.set_focus(self.query_one("#tree", Tree))
+            self._home()                               # Escape returns to the landing screen
 
     if "--selftest" in argv:                       # headless construction/mount check (no TTY needed)
         import asyncio
