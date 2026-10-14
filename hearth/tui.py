@@ -14,6 +14,7 @@ from . import main as hearth
 FIRE = ["#ffd23f", "#ffb627", "#ff9505", "#ff7518", "#f0580f",
         "#e5440f", "#ff7518", "#ff9505", "#ffb627", "#ff9505", "#e5440f", "#c23208"]
 ORDER = ["bonfire", "panel", "dock", "hyprland", "keybind", "hearth"]
+KDELIM = " | "   # a keybind action with an `_alt` twin shows both chords in one field, split by this
 
 
 def _fmt(v):
@@ -57,6 +58,7 @@ def run(argv=None):
         .row Switch.-on > .switch--slider { color: #ff9505; }
         .row Select { width: 30; }
         .row Input { width: 40; background: #2c2017; color: #ffe9d4; border: round #a8531f; }
+        .row Input.kb { width: 48; }
         .row Input:focus { border: round #ff9505; }
         #msg { dock: bottom; height: 1; padding: 0 2; color: #b89878; background: #140e0a; }
         Footer { background: #120c09; }
@@ -96,20 +98,27 @@ def run(argv=None):
             found = {k.split(".", 1)[0] for k in self.schema}
             return [c for c in ORDER if c in found] + sorted(found - set(ORDER))
 
-        def _visible(self, k):
-            ent = self.schema[k]
-            if ent.get("tier") == "advanced" and not self.advanced:
+        def _alt_sibling(self, k):              # the `_alt` twin of a keybind action, if the schema has one
+            a = k + "_alt"
+            return a if a in self.schema else None
+
+        def _is_folded_alt(self, k):            # an `_alt` key is shown folded into its base row, not alone
+            return k.endswith("_alt") and k[:-4] in self.schema
+
+        def _matches(self, k):
+            if self.schema[k].get("tier") == "advanced" and not self.advanced:
                 return False
-            flt = self.filter.lower()
-            if flt and flt not in k.lower() and flt not in str(ent.get("label", "")).lower():
-                return False
-            return True
+            if not self.filter:
+                return True
+            f = self.filter.lower()
+            hit = lambda x: f in x.lower() or f in str(self.schema[x].get("label", "")).lower()
+            alt = self._alt_sibling(k)
+            return hit(k) or (alt is not None and hit(alt))
 
         def _form_keys(self):
-            if self.filter:
-                return [k for k in sorted(self.schema) if self._visible(k)]
+            in_cat = (lambda k: True) if self.filter else (lambda k: k.split(".", 1)[0] == self.category)
             return [k for k in sorted(self.schema)
-                    if k.split(".", 1)[0] == self.category and self._visible(k)]
+                    if not self._is_folded_alt(k) and in_cat(k) and self._matches(k)]
 
         # ---- sidebar ----
         def _build_cats(self):
@@ -121,9 +130,11 @@ def run(argv=None):
                 self.category = self._cats()[0]
 
         # ---- the form (type-aware controls) ----
-        def _control(self, k, ent, val):
+        def _control(self, k, ent, val, eff):
             t = ent.get("type")
             c = ent.get("constraints", {}) or {}
+            is_kb = ent.get("reload") == "keybind"
+            alt = self._alt_sibling(k) if is_kb else None
             if t == "bool":
                 w = Switch(value=bool(val))
             elif t == "enum":
@@ -131,6 +142,12 @@ def run(argv=None):
                 sval = _fmt(val)
                 w = Select([(o, o) for o in opts], value=(sval if sval in opts else (opts[0] if opts else None)),
                            allow_blank=not opts)
+            elif alt:                            # fold the primary + its `_alt` twin into one field
+                w = Input(value=(_fmt(val) + KDELIM + _fmt(eff.get(alt))).strip(),
+                          placeholder="SUPER + Return | SUPER + T", classes="kb")
+                w._hkey_alt = alt
+            elif is_kb:
+                w = Input(value=_fmt(val), placeholder="SUPER + SHIFT + K   (blank = default)", classes="kb")
             else:
                 w = Input(value=_fmt(val))
             w._hkey = k
@@ -144,11 +161,13 @@ def run(argv=None):
             help_txt = ent.get("help", "")
             if ent.get("scope") == "build":
                 help_txt = (help_txt + "  ↻ needs rebuild").strip()
+            if ent.get("reload") == "keybind" and self._alt_sibling(k):
+                help_txt = (help_txt + "   ·   two keys — primary | alt (clear the 2nd to drop it)").strip()
             if help_txt:
                 box.compose_add_child(Static(help_txt, classes="hlp"))
             row = Horizontal(classes="row")
             row.compose_add_child(box)
-            row.compose_add_child(self._control(k, ent, eff.get(k)))
+            row.compose_add_child(self._control(k, ent, eff.get(k), eff))
             return row
 
         async def _load_form(self):
@@ -180,6 +199,19 @@ def run(argv=None):
                 f"[#9ad27a]✓ {key} = {_fmt(res)}[/]" if ok else f"[#ff8a7a]✗ {res}[/]")
             return ok
 
+        def _set_pair(self, kb, bv, ka, av):     # write a primary|alt keybind field (skip the untouched half)
+            eff = hearth._effective()
+            out = []
+            for key, val in ((kb, bv), (ka, av)):
+                short = key.rsplit(".", 1)[-1]
+                if _fmt(eff.get(key)) == val:
+                    out.append(f"[#b89878]· {short} unchanged[/]")
+                    continue
+                ok, res = hearth.set_value(key, val)
+                out.append(f"[#9ad27a]✓ {short} = {_fmt(res) or '∅'}[/]"
+                           if ok else f"[#ff8a7a]✗ {short}: {res}[/]")
+            self.query_one("#msg", Static).update("   ".join(out))
+
         def on_switch_changed(self, event):
             if not self._loading and getattr(event.switch, "_hkey", None):
                 self._set(event.switch._hkey, event.value)
@@ -192,6 +224,11 @@ def run(argv=None):
             if event.input.id == "search":
                 self.filter = event.value
                 self.run_worker(self._load_form())
+                return
+            if getattr(event.input, "_hkey_alt", None):
+                parts = [p.strip() for p in event.value.split("|")]
+                self._set_pair(event.input._hkey, parts[0] if parts else "",
+                               event.input._hkey_alt, parts[1] if len(parts) > 1 else "")
                 return
             if getattr(event.input, "_hkey", None):
                 self._set(event.input._hkey, event.value)
@@ -263,6 +300,16 @@ def run(argv=None):
                         app.set_focus(w); await pilot.pause(); app.action_reset(); await pilot.pause(); break
                     kinds = {c[0] for c in calls}
                     assert "set" in kinds and "reset" in kinds, f"controls did not fire set/reset: {calls}"
+                    # merged primary|alt keybind field writes BOTH underlying keys
+                    app.category = "keybind"
+                    await app._load_form(); await pilot.pause()
+                    paired = [w for w in app.query(_In) if getattr(w, "_hkey_alt", None)]
+                    assert paired, "no merged primary|alt keybind field rendered"
+                    pw = paired[0]
+                    app.on_input_submitted(_In.Submitted(pw, "SUPER + Z" + KDELIM + "SUPER + X"))
+                    await pilot.pause()
+                    assert ("set", pw._hkey) in calls, f"primary not written: {calls}"
+                    assert ("set", pw._hkey_alt) in calls, f"alt not written: {calls}"
 
         asyncio.run(_t())
         print("hearth tui deep OK" if deep else "hearth tui selftest OK")
