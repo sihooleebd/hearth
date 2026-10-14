@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""hearth tui -- a keyboard-driven settings browser (Textual).
+"""hearth tui -- a warm, keyboard-driven settings browser (Textual).
 
-Three panes that scale to a large settings surface: CATEGORIES (the top-level groups) | the SETTINGS in
-that category with their live values | DETAIL + an inline editor for the focused setting. `/` searches
-every setting across categories, `.` reveals advanced ("hidden") ones, `d` resets to default, Esc goes
-home. Edits validate against the schema, then write + signal live.
+Not a grid: one flowing, ember-lit column of settings grouped under glowing category embers, with a
+"hearth" panel at the foot where you tend the selected one. `/` searches the embers, `.` reveals
+advanced ones, `d` resets to default, Esc goes home. Edits validate against the schema, then write +
+signal live.
 """
 import sys
 import json
 
 from . import main as hearth
 
-# Braille mark shown on the TUI landing screen. Kept in sync with ../logo.txt via .logo-gen.py.
+# Braille mark shown on the landing hearth. Kept in sync with ../logo.txt via .logo-gen.py.
 HEARTH_LOGO = """
 ⠀⢠⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⡄⠀
 ⠀⠸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠇⠀
@@ -27,6 +27,13 @@ HEARTH_LOGO = """
 ⠸⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠇
 """
 
+# vertical fire gradient for the logo + section embers (top = bright gold, base = deep coal)
+FIRE = ["#ffd23f", "#ffb627", "#ff9505", "#ff7518", "#f0580f",
+        "#e5440f", "#ff7518", "#ff9505", "#ffb627", "#ff9505", "#e5440f", "#c23208"]
+
+# a warm order for the top-level categories; anything else trails alphabetically
+ORDER = ["bonfire", "panel", "dock", "hyprland", "keybind", "hearth"]
+
 
 def _fmt(v):
     if isinstance(v, bool):
@@ -41,30 +48,47 @@ def run(argv=None):
     try:
         from textual.app import App
         from textual.binding import Binding
-        from textual.containers import Horizontal, Vertical
+        from textual.containers import Vertical
         from textual.widgets import OptionList, Input, Static, Footer
         from textual.widgets.option_list import Option
+        from rich.text import Text
     except ImportError:
         sys.stderr.write("hearth tui: textual is not installed\n")
         return 1
 
     class HearthApp(App):
+        # Embers, not fluorescent tubes. A warm coal ground, cream text, amber flames.
         CSS = """
-        Screen { layout: horizontal; }
-        #cats   { width: 18; border-right: solid $primary; }
-        #mid    { width: 44%; border-right: solid $primary; }
-        #detail { width: 1fr; padding: 0 1; }
-        .hdr    { color: $accent; text-style: bold; padding: 0 1; }
-        #search { margin: 0 1 1 1; }
-        OptionList { height: 1fr; }
-        #ed     { margin: 1 0; }
-        #msg    { color: $text-muted; }
+        Screen { background: #1a1310; color: #efe1d1; }
+        #title { dock: top; height: 1; content-align: center middle; color: #ff9505; text-style: bold; }
+        #search {
+            dock: top; margin: 0 3 1 3; height: 3;
+            background: #241a13; color: #efe1d1; border: round #a8531f;
+        }
+        #search:focus { border: round #ff9505; }
+        OptionList {
+            background: transparent; padding: 0 2; scrollbar-color: #a8531f; scrollbar-background: #1a1310;
+        }
+        OptionList:focus { background: transparent; }
+        OptionList > .option-list--option-highlighted { background: #6b3317; color: #fff2e4; }
+        OptionList:focus > .option-list--option-highlighted { background: #8f4420; color: #fff2e4; text-style: bold; }
+        #hearth {
+            dock: bottom; height: 15; margin: 0 3 1 3; padding: 1 2;
+            background: #221811; border: round #a8531f;
+        }
+        #hearth:focus-within { border: round #ff9505; }
+        #info { height: 1fr; }
+        #ed { background: #2c2017; color: #ffe9d4; border: round #c0632e; }
+        #ed:focus { border: round #ff9505; }
+        #msg { color: #b89878; height: 1; }
+        Footer { background: #120c09; color: #b89878; }
+        Footer > .footer--key { background: #6b3317; color: #ffd23f; }
         """
         BINDINGS = [
             Binding("slash", "search", "Search"),
             Binding("full_stop", "advanced", "Advanced"),
             Binding("d", "reset", "Reset"),
-            Binding("escape", "back", "Home"),
+            Binding("escape", "home", "Home"),
             Binding("q", "quit", "Quit"),
         ]
 
@@ -73,87 +97,80 @@ def run(argv=None):
             self.schema = hearth._schema()
             self.advanced = False
             self.filter = ""
-            self.category = None
             self.key = None
 
         def compose(self):
-            with Horizontal():
-                with Vertical(id="cats"):
-                    yield Static(" categories", classes="hdr")
-                    yield OptionList(id="catlist")
-                with Vertical(id="mid"):
-                    yield Input(placeholder="/ search all settings", id="search")
-                    yield OptionList(id="setlist")
-                with Vertical(id="detail"):
-                    yield Static("", id="info")
-                    yield Input(id="ed")
-                    yield Static("", id="msg")
+            yield Static("🔥  b o n f i r e   ·   s e t t i n g s", id="title")
+            yield Input(placeholder="search the embers…", id="search")
+            yield OptionList(id="list")
+            with Vertical(id="hearth"):
+                yield Static("", id="info")
+                yield Input(id="ed")
+                yield Static("", id="msg")
             yield Footer()
 
         def on_mount(self):
-            self.title = "hearth settings"
-            self._build_cats()
+            self.title = "bonfire settings"
+            self._build_list()
             self._home()
 
         # ---- data ----
         def _cats(self):
-            return sorted({k.split(".", 1)[0] for k in self.schema})
+            found = {k.split(".", 1)[0] for k in self.schema}
+            ordered = [c for c in ORDER if c in found]
+            return ordered + sorted(found - set(ordered))
 
-        def _settings(self):
-            eff = hearth._effective()
+        def _visible(self, k):
+            ent = self.schema[k]
+            if ent.get("tier") == "advanced" and not self.advanced:
+                return False
             flt = self.filter.lower()
-            out = []
-            for k in sorted(self.schema):
-                ent = self.schema[k]
-                if ent.get("tier") == "advanced" and not self.advanced:
-                    continue
-                if flt:
-                    if flt not in k.lower() and flt not in str(ent.get("label", "")).lower():
-                        continue
-                elif self.category and k.split(".", 1)[0] != self.category:
-                    continue
-                out.append(k)
-            return out, eff
+            if flt and flt not in k.lower() and flt not in str(ent.get("label", "")).lower():
+                return False
+            return True
 
-        # ---- build ----
-        def _build_cats(self):
-            ol = self.query_one("#catlist", OptionList)
+        def _row(self, k, eff, strip=None):
+            ent = self.schema[k]
+            name = k[len(strip) + 1:] if (strip and k.startswith(strip + ".")) else k
+            val = _fmt(eff.get(k))
+            t = Text("   ")
+            t.append(ent.get("label", name), style="#efe1d1")
+            t.append("   ")
+            t.append(val if val != "" else "—", style="#e0a35f")
+            if ent.get("scope", "runtime") == "build":
+                t.append("  ⚙", style="#9c8268")
+            return t
+
+        # ---- build the flowing, grouped list ----
+        def _build_list(self):
+            ol = self.query_one("#list", OptionList)
             ol.clear_options()
-            cats = self._cats()
-            for c in cats:
-                ol.add_option(Option(c, id=c))
-            if cats and self.category is None:
-                self.category = cats[0]
-            self._build_settings()
+            eff = hearth._effective()
+            if self.filter:
+                hits = [k for k in sorted(self.schema) if self._visible(k)]
+                for k in hits:
+                    ol.add_option(Option(self._row(k, eff), id=k))
+                if not hits:
+                    ol.add_option(Option(Text("   no embers match", style="#b89878"), disabled=True))
+                return
+            for ci, cat in enumerate(self._cats()):
+                ks = [k for k in sorted(self.schema) if k.split(".", 1)[0] == cat and self._visible(k)]
+                if not ks:
+                    continue
+                ember = Text()
+                ember.append(" ✦ ", style=FIRE[ci % len(FIRE)])
+                ember.append(cat, style=f"bold {FIRE[ci % len(FIRE)]}")
+                ol.add_option(Option(ember, disabled=True))
+                for k in ks:
+                    ol.add_option(Option(self._row(k, eff, strip=cat), id=k))
 
-        def _build_settings(self):
-            ol = self.query_one("#setlist", OptionList)
-            ol.clear_options()
-            keys, eff = self._settings()
-            for k in keys:
-                ent = self.schema[k]
-                if not self.filter and self.category and k.startswith(self.category + "."):
-                    name = k[len(self.category) + 1:]
-                else:
-                    name = k
-                badge = "" if ent.get("scope", "runtime") == "runtime" else "  ⚙"
-                ol.add_option(Option(f"{ent.get('label', name)} = {_fmt(eff.get(k))}{badge}", id=k))
-            if not keys:
-                ol.add_option(Option("[dim](no settings)[/dim]", id=None, disabled=True))
-
-        # ---- events ----
+        # ---- selection ----
         def on_option_list_option_highlighted(self, event):
-            oid = event.option_list.id
-            if oid == "catlist" and event.option is not None:
-                self.category = event.option.id
-                self.filter = ""
-                self.query_one("#search", Input).value = ""
-                self._build_settings()
-            elif oid == "setlist" and event.option is not None and event.option.id:
+            if event.option is not None and event.option.id:
                 self._show(event.option.id)
 
         def on_option_list_option_selected(self, event):
-            if event.option_list.id == "setlist" and event.option is not None and event.option.id:
+            if event.option is not None and event.option.id:
                 self._show(event.option.id)
                 self.set_focus(self.query_one("#ed", Input))
 
@@ -163,50 +180,46 @@ def run(argv=None):
             val = hearth._effective().get(key)
             c = ent.get("constraints", {}) or {}
             lines = [
-                f"[b]{ent.get('label', key)}[/b]",
-                f"[dim]{key}[/dim]",
+                f"[b #ff9505]{ent.get('label', key)}[/]   [#7a6450]{key}[/]",
                 "",
-                ent.get("help", ""),
+                f"[#cdb79e]{ent.get('help', '')}[/]",
                 "",
-                f"type:    {ent.get('type')}",
-                f"value:   {_fmt(val)}",
-                f"default: {_fmt(ent.get('default'))}",
-                f"scope:   {ent.get('scope', 'runtime')}"
-                + ("   [yellow]needs rebuild[/yellow]" if ent.get("scope") == "build" else ""),
+                f"[#9c8268]now[/]  [#e0a35f]{_fmt(val)}[/]     [#9c8268]default[/]  {_fmt(ent.get('default'))}     [#9c8268]type[/]  {ent.get('type')}"
+                + ("     [yellow]↻ needs rebuild[/]" if ent.get("scope") == "build" else ""),
             ]
             opts = c.get("options")
             if opts:
-                lines.append("options: " + ", ".join(str(o.get("value", o) if isinstance(o, dict) else o) for o in opts))
+                lines.append("[#9c8268]options[/]  " + ", ".join(str(o.get("value", o) if isinstance(o, dict) else o) for o in opts))
             if "min" in c or "max" in c:
-                lines.append(f"range:   {c.get('min', '')}..{c.get('max', '')} {c.get('unit', '')}".rstrip())
-            self.query_one("#info", Static).update("\n".join(l for l in lines if l is not None))
+                lines.append(f"[#9c8268]range[/]  {c.get('min', '')}–{c.get('max', '')} {c.get('unit', '')}".rstrip())
+            self.query_one("#info", Static).update("\n".join(lines))
             ed = self.query_one("#ed", Input)
             ed.value = _fmt(val)
             ed.styles.display = "block"
             self.query_one("#msg", Static).update(
-                "[dim]⏎ on a setting: edit · ⏎ in the field: apply · d reset · . advanced · / search[/dim]")
+                "[#b89878]⏎ edit · ⏎-in-field apply · d reset to default · . advanced · / search · esc home[/]")
 
         # ---- edits + search ----
         def on_input_submitted(self, event):
             if event.input.id == "search":
                 self.filter = event.value
-                self._build_settings()
-                self.set_focus(self.query_one("#setlist", OptionList))
+                self._build_list()
+                self.set_focus(self.query_one("#list", OptionList))
                 return
             if event.input.id == "ed" and self.key:
                 ok, res = hearth.set_value(self.key, event.value)
                 msg = self.query_one("#msg", Static)
                 if ok:
-                    msg.update(f"[green]set {self.key} = {_fmt(res)}[/green]")
-                    self._build_settings()
+                    msg.update(f"[#9ad27a]✓ set {self.key} = {_fmt(res)}[/]")
+                    self._build_list()
                     self._show(self.key)
                 else:
-                    msg.update(f"[red]{res}[/red]")
+                    msg.update(f"[#ff8a7a]✗ {res}[/]")
 
         def on_input_changed(self, event):
             if event.input.id == "search":
                 self.filter = event.value
-                self._build_settings()
+                self._build_list()
 
         # ---- actions ----
         def action_search(self):
@@ -214,29 +227,26 @@ def run(argv=None):
 
         def action_advanced(self):
             self.advanced = not self.advanced
-            self._build_settings()
+            self._build_list()
             self.query_one("#msg", Static).update(
-                f"[dim]advanced {'shown' if self.advanced else 'hidden'}[/dim]")
+                f"[#b89878]advanced settings {'glowing' if self.advanced else 'banked'}[/]")
 
         def action_reset(self):
             if self.key:
                 hearth.reset_value(self.key)
-                self._build_settings()
+                self._build_list()
                 self._show(self.key)
-                self.query_one("#msg", Static).update(f"[yellow]reset {self.key}[/yellow]")
+                self.query_one("#msg", Static).update(f"[#e0a35f]↺ {self.key} back to default[/]")
 
-        def action_back(self):
+        def action_home(self):
             self._home()
-            self.set_focus(self.query_one("#catlist", OptionList))
+            self.set_focus(self.query_one("#list", OptionList))
 
-        # ---- landing ----
+        # ---- the landing hearth: the campfire, glowing ----
         def _banner(self):
-            fire = ["#f6c453", "#f4a833", "#ef8d2f", "#e5702a", "#d8542a",
-                    "#e5702a", "#ef8d2f", "#f4a833", "#f6c453", "#ef8d2f", "#e5702a", "#d8542a"]
             rows = HEARTH_LOGO.strip("\n").split("\n")
-            out = [f"[{fire[i % len(fire)]}]{r}[/]" for i, r in enumerate(rows)]
-            out += ["", "[b]hearth[/b] [dim]— unified settings[/dim]",
-                    "[dim]tab/←→ panes · ↑↓ navigate · ⏎ edit · / search · . advanced · d reset[/dim]"]
+            out = [f"[{FIRE[i % len(FIRE)]}]{r}[/]" for i, r in enumerate(rows)]
+            out += ["", "[#cdb79e]pick a setting above to tend it — ↑↓ to wander, / to search the embers.[/]"]
             return "\n".join(out)
 
         def _home(self):
