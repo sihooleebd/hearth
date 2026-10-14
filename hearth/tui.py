@@ -146,8 +146,11 @@ def run(argv=None):
                 w = Input(value=(_fmt(val) + KDELIM + _fmt(eff.get(alt))).strip(),
                           placeholder="SUPER + Return | SUPER + T", classes="kb")
                 w._hkey_alt = alt
+            elif is_kb and k.endswith("_mod"):   # a nav-family MODIFIER (single modifier, no "|" chords)
+                w = Input(value=_fmt(val), placeholder="SUPER + CTRL   (blank = default)", classes="kb")
             elif is_kb:
-                w = Input(value=_fmt(val), placeholder="SUPER + SHIFT + K   (blank = default)", classes="kb")
+                w = Input(value=_fmt(val), placeholder="SUPER + K   ·   several: A | B   ·   blank = default",
+                          classes="kb")
             else:
                 w = Input(value=_fmt(val))
             w._hkey = k
@@ -161,8 +164,8 @@ def run(argv=None):
             help_txt = ent.get("help", "")
             if ent.get("scope") == "build":
                 help_txt = (help_txt + "  ↻ needs rebuild").strip()
-            if ent.get("reload") == "keybind" and self._alt_sibling(k):
-                help_txt = (help_txt + "   ·   two keys — primary | alt (clear the 2nd to drop it)").strip()
+            if ent.get("reload") == "keybind" and not k.endswith("_mod"):
+                help_txt = (help_txt + "   ·   one or more chords, separated with |").strip()
             if help_txt:
                 box.compose_add_child(Static(help_txt, classes="hlp"))
             row = Horizontal(classes="row")
@@ -226,9 +229,10 @@ def run(argv=None):
                 self.run_worker(self._load_form())
                 return
             if getattr(event.input, "_hkey_alt", None):
-                parts = [p.strip() for p in event.value.split("|")]
+                parts = [p.strip() for p in event.value.split("|") if p.strip()]
+                # first chord -> base key; any extras -> the `_alt` key (itself "|"-joined, bindkb splits it)
                 self._set_pair(event.input._hkey, parts[0] if parts else "",
-                               event.input._hkey_alt, parts[1] if len(parts) > 1 else "")
+                               event.input._hkey_alt, KDELIM.join(parts[1:]))
                 return
             if getattr(event.input, "_hkey", None):
                 self._set(event.input._hkey, event.value)
@@ -263,7 +267,7 @@ def run(argv=None):
 
         calls = []
         if deep:                                   # don't mutate the real store while driving the UI
-            hearth.set_value = lambda k, v: (calls.append(("set", k)) or (True, v))
+            hearth.set_value = lambda k, v: (calls.append(("set", k, v)) or (True, v))
             hearth.reset_value = lambda k: calls.append(("reset", k))
 
         async def _t():
@@ -300,16 +304,27 @@ def run(argv=None):
                         app.set_focus(w); await pilot.pause(); app.action_reset(); await pilot.pause(); break
                     kinds = {c[0] for c in calls}
                     assert "set" in kinds and "reset" in kinds, f"controls did not fire set/reset: {calls}"
-                    # merged primary|alt keybind field writes BOTH underlying keys
+                    # keybind category
                     app.category = "keybind"
                     await app._load_form(); await pilot.pause()
-                    paired = [w for w in app.query(_In) if getattr(w, "_hkey_alt", None)]
+                    inputs = list(app.query(_In))
+                    seen = lambda key, val: any(c[0] == "set" and c[1] == key and c[2] == val for c in calls)
+                    # (a) a merged primary|alt field: 1st chord -> base key, the rest -> the alt key
+                    paired = [w for w in inputs if getattr(w, "_hkey_alt", None)]
                     assert paired, "no merged primary|alt keybind field rendered"
                     pw = paired[0]
-                    app.on_input_submitted(_In.Submitted(pw, "SUPER + Z" + KDELIM + "SUPER + X"))
+                    app.on_input_submitted(_In.Submitted(pw, "SUPER + Z" + KDELIM + "SUPER + X" + KDELIM + "SUPER + Y"))
                     await pilot.pause()
-                    assert ("set", pw._hkey) in calls, f"primary not written: {calls}"
-                    assert ("set", pw._hkey_alt) in calls, f"alt not written: {calls}"
+                    assert seen(pw._hkey, "SUPER + Z"), f"primary chord not written: {calls}"
+                    assert seen(pw._hkey_alt, "SUPER + X | SUPER + Y"), f"extra chords not folded into alt: {calls}"
+                    # (b) a plain single keybind accepts a "|"-multi value in its ONE key
+                    singles = [w for w in inputs if getattr(w, "_hkey", None) and not getattr(w, "_hkey_alt", None)
+                               and not w._hkey.endswith("_mod")]
+                    assert singles, "no single keybind field rendered"
+                    sw = singles[0]
+                    app.on_input_submitted(_In.Submitted(sw, "SUPER + J | SUPER + K"))
+                    await pilot.pause()
+                    assert seen(sw._hkey, "SUPER + J | SUPER + K"), f"single multi-chord not written: {calls}"
 
         asyncio.run(_t())
         print("hearth tui deep OK" if deep else "hearth tui selftest OK")
